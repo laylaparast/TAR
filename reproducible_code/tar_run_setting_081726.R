@@ -18,7 +18,6 @@ if (!exists("setting_to_run") || !(setting_to_run %in% 1:8)) {
   stop("tar_run_setting_081726.R: `setting_to_run` must be set to an integer 1-8 before sourcing this file, e.g.:\n  setting_to_run <- 1\n  source(\"tar_run_setting_081726.R\")")
 }
 
-#setwd("/path/to/reproducibility_package")
 source("tar_functions_081726.R")
 
 n0 <- 500

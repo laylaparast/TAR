@@ -10,7 +10,6 @@
 # needed.
 ########################################################################
 
-#setwd("/path/to/reproducibility_package")
 source("tar_functions_081726.R")
 
 epsilon <- 0.05
