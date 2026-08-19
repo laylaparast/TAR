@@ -1,3 +1,7 @@
+# Tutorial for select_surrogate
+
+Go here to view a tutorial for the select_surrogate function: [select_surrogate Tutorial](https://htmlpreview.github.io/?https://github.com/laylaparast/TAR/blob/main/select_surrogate_tutorial.html). 
+
 # Reproducibility materials: Treatment-Aware Regularization (TAR)
 
 This folder contains the R code needed to reproduce the simulation study results reported in the paper. All files below should be placed together in a single directory before running anything.
