@@ -1,0 +1,135 @@
+---
+title: "A Tutorial for select.surrogate: Treatment-Aware Regularization"
+output: html_document
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+## Introduction
+
+`select.surrogate` estimates the proportion of treatment effect explained (PTE) by a set of candidate surrogate markers, and optionally first selects a subset of those candidates. It implements the treatment-aware regularization (TAR) approach of Parast, Freestone, and Tarr (2026), along with two related approaches for comparison: using all candidates with no selection, and an unweighted regularized approach.
+
+Three selection options are available, set via the `selection` argument:
+
+- `selection = "none"`: no selection; the PTE is estimated using all candidate markers, agreeing with `R.s.estimate` run with `number = "multiple"`.
+- `selection = "TAR"`: treatment-aware regularization. Candidate markers with little or no treatment effect are penalized more heavily in a weighted lasso fit to the treated group, and the penalty is chosen, via cross-validation within the treated group, to be the sparsest point along the path whose estimated PTE falls no more than a pre-specified tolerance (`epsilon`) below that of the full candidate set.
+- `selection = "rr"`: an unweighted, ordinary regularized approach (robust regularization), included mainly for comparison to TAR.
+
+This tutorial walks through all three options using the example dataset included with the package, `d_tar_example`, and briefly covers the remaining optional arguments.
+
+```{r setup}
+#you will need version 3.3 or higher of the package
+#if using CRAN version
+#install.packages("RSurrogate")
+#if using Github
+#library(remotes
+#remotes::install_github("laylaparast/RSurrogate")
+
+library(Rsurrogate)
+
+#set seed
+set.seed(100)
+```
+
+## Example data
+
+`d_tar_example` is one simulated dataset with 500 treated and 500 control observations, and 9 candidate surrogate markers. By design, only the first three markers (`s1`, `s2`, `s3`) both differ between the treatment groups and predict the outcome; the remaining six markers are not part of the true minimal surrogate set.
+
+```{r data}
+data(d_tar_example)
+names(d_tar_example)
+dim(d_tar_example$sone)
+dim(d_tar_example$szero)
+length(d_tar_example$yone)
+length(d_tar_example$yzero)
+```
+
+`sone` and `szero` are matrices of the 9 candidate markers for the treated and control groups, respectively, and `yone` and `yzero` are the corresponding primary outcome vectors. This is exactly the argument structure used by `R.s.estimate` elsewhere in this package.
+
+## No selection: using all candidate markers
+
+Setting `selection = "none"` estimates the PTE using all 9 candidate markers, with no selection step.
+
+```{r none}
+fit.none <- select.surrogate(sone = d_tar_example$sone, szero = d_tar_example$szero,
+                              yone = d_tar_example$yone, yzero = d_tar_example$yzero,
+                              selection = "none")
+fit.none
+```
+
+`delta` is the estimated overall treatment effect, `delta.s` is the estimated residual treatment effect after accounting for all 9 markers, and `R.s` is the resulting PTE estimate. There is no `selection` element here, since no markers were removed.
+
+## Treatment-aware regularization (TAR)
+
+Setting `selection = "TAR"` instead first selects a subset of the 9 candidate markers.
+
+```{r tar}
+fit.tar <- select.surrogate(sone = d_tar_example$sone, szero = d_tar_example$szero,
+                             yone = d_tar_example$yone, yzero = d_tar_example$yzero,
+                             selection = "TAR")
+fit.tar
+names(fit.tar$selection)
+```
+
+`fit.tar$selection` is a named vector giving the (penalized) lasso coefficient of each selected marker; `names(fit.tar$selection)` gives just the names of the markers TAR selected. In this example, TAR tends to recover `s1`, `s2`, and `s3`, the three markers that actually drive the treatment effect, while `R.s` remains close to the full-candidate-set estimate from `fit.none` even though far fewer markers are used.
+
+## An unweighted regularized approach (rr)
+
+Setting `selection = "rr"` uses an ordinary (unweighted) cross-validated lasso instead, with no treatment-effect-based penalty weighting.
+
+```{r rr}
+fit.rr <- select.surrogate(sone = d_tar_example$sone, szero = d_tar_example$szero,
+                            yone = d_tar_example$yone, yzero = d_tar_example$yzero,
+                            selection = "rr")
+fit.rr
+names(fit.rr$selection)
+```
+
+Because `rr` selects markers based only on how well they predict the outcome, without regard to whether they differ between treatment groups, it will often select a different, sometimes larger, set of markers than TAR, and can achieve a lower PTE for a given set size.
+
+## Comparing the three approaches
+
+```{r compare}
+data.frame(
+  approach   = c("none", "TAR", "rr"),
+  n.selected = c(ncol(d_tar_example$sone), length(fit.tar$selection), length(fit.rr$selection)),
+  R.s        = c(fit.none$R.s, fit.tar$R.s, fit.rr$R.s)
+)
+```
+
+## Other options
+
+### Bootstrap variance and confidence intervals
+
+Setting `var = TRUE` adds a bootstrap standard error and a 95% confidence interval (the 2.5th and 97.5th percentiles of the bootstrap replicates) for `delta`, `delta.s`, and `R.s`. Unlike the rest of this package, which uses perturbation-resampling, `select.surrogate` uses a nonparametric bootstrap: both treatment groups are resampled with replacement and the entire selection procedure, including re-selection of the penalty, is rerun on every resample. `boot.num` controls the number of resamples (200 by default, matching the simulation study in Parast, Freestone, and Tarr (2026)). Because the whole procedure is rerun on every resample, this can take a while, especially for `selection = "TAR"`; a smaller `boot.num` is used below just for a quick illustration.
+
+```{r var}
+fit.tar.var <- select.surrogate(sone = d_tar_example$sone, szero = d_tar_example$szero,
+                                 yone = d_tar_example$yone, yzero = d_tar_example$yzero,
+                                 selection = "TAR", var = TRUE, boot.num = 50)
+fit.tar.var$R.s.var
+fit.tar.var$conf.int.R.s
+```
+
+### The lasso path: nlambda
+
+`nlambda` (default 20) controls the number of penalty values considered along the lasso path for `selection = "TAR"` or `selection = "rr"`. A finer grid (larger `nlambda`) gives TAR or rr more candidate penalty values to choose from, at the cost of more computation.
+
+### Tuning TAR: folds, epsilon, c.constant, small.n
+
+These four arguments only affect `selection = "TAR"`:
+
+- `folds` (default 5): the number of cross-validation folds, within the treated group, used to select the penalty.
+- `epsilon` (default 0.05): the tolerance. TAR selects the sparsest point along the weighted lasso path whose estimated PTE falls no more than `epsilon` below that of the full candidate set. A larger `epsilon` allows a smaller selected set at the cost of a larger potential drop in PTE.
+- `c.constant` (default 1): controls how strongly a candidate marker's estimated treatment effect magnitude affects its penalty weight; larger values penalize low-treatment-effect markers more aggressively.
+- `small.n` (default 1e-6): a small constant added before inverting each marker's estimated treatment effect magnitude to form its penalty weight, so that a marker with an estimated treatment effect of (or very close to) zero does not produce an infinite weight.
+
+### Tuning rr: lambda_rule
+
+`lambda_rule` (default `"lambda.1se"`) only affects `selection = "rr"`, and controls which cross-validated penalty is used: `"lambda.1se"`, the most regularized penalty within one standard error of the minimum cross-validated error, or `"lambda.min"`, the penalty that minimizes cross-validated error directly. `"lambda.1se"` is more conservative and more likely to select a smaller (sometimes empty) set of markers.
+
+## Reference
+
+Parast, L., Freestone, G., Tarr, J. (2026). Treatment-Aware Regularization via Multi-Objective Optimization for Surrogate Selection.
